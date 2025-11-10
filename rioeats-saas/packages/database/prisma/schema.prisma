@@ -1,0 +1,326 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ================================
+// CORE ENTITIES
+// ================================
+
+model Company {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  email             String   @unique
+  phone             String?
+  description       String?
+  logoUrl           String?
+  address           String?
+  city              String?
+  state             String?
+  cep               String?
+  cnpj              String?
+  
+  // Business Configuration
+  isActive          Boolean  @default(true)
+  isTrial           Boolean  @default(true)
+  trialEndsAt       DateTime?
+  subscriptionEndsAt DateTime?
+  plan              Plan     @default(TRIAL)
+  monthlyPrice      Float    @default(99.00)
+  
+  // Market Settings
+  categories        String[] @default([])
+  deliveryZones     Json?    // Array of delivery zones with pricing
+  operatingHours    Json?    // Opening hours configuration
+  paymentMethods    String[] @default([])
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  owner             User
+  orders            Order[]
+  products          Product[]
+  subscriptions     Subscription[]
+  
+  @@map("companies")
+}
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String?  // Nullable for Google OAuth
+  name            String
+  phone           String?
+  role            UserRole @default(CUSTOMER)
+  
+  // Google OAuth
+  googleId        String?  @unique
+  googleEmail     String?  @unique
+  googleName      String?
+  googleAvatar    String?
+  
+  // Session
+  lastLoginAt     DateTime?
+  isActive        Boolean  @default(true)
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  companyId       String?
+  company         Company? @relation(fields: [companyId], references: [id])
+  orders          Order[]
+  addresses       Address[]
+  reviews         Review[]
+  
+  @@map("users")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  status          OrderStatus @default(PENDING)
+  
+  // Customer Info
+  customerName    String
+  customerPhone   String
+  customerEmail   String?
+  
+  // Delivery Info
+  deliveryAddress String
+  deliveryComplement String?
+  deliveryNeighborhood String
+  deliveryCity    String
+  deliveryState   String
+  deliveryCep     String
+  deliveryLat     Float?
+  deliveryLng     Float?
+  deliveryFee     Float       @default(0)
+  deliveryTime    Int?        // estimated minutes
+  
+  // Order Items
+  items           Json        // Array of order items with extras
+  subtotal        Float
+  deliveryFee     Float
+  discount        Float       @default(0)
+  total           Float
+  
+  // Payment
+  paymentMethod   PaymentMethod
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentId       String?       // Mercado Pago payment ID
+  paymentUrl      String?       // PIX QR code URL
+  changeFor       Float?        // For cash payments
+  
+  // Tracking
+  estimatedTime   Int?         // estimated preparation time in minutes
+  preparedAt      DateTime?
+  deliveredAt     DateTime?
+  completedAt     DateTime?
+  
+  // Notes
+  notes           String?      // customer notes
+  adminNotes      String?      // restaurant notes
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id])
+  customerId      String?
+  customer        User?    @relation(fields: [customerId], references: [id])
+  reviews         Review[]
+  
+  @@map("orders")
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  price           Float
+  imageUrl        String?
+  
+  // Product Configuration
+  category        String
+  isAvailable     Boolean  @default(true)
+  stock           Int?     // null = unlimited
+  preparationTime Int?     // minutes
+  
+  // Extras and Options
+  extras          Json?    // available extras/prices
+  options         Json?    // configurable options
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id])
+  
+  @@map("products")
+}
+
+model Address {
+  id              String  @id @default(cuid())
+  street          String
+  number          String
+  complement      String?
+  neighborhood    String
+  city            String
+  state           String
+  cep             String
+  lat             Float?
+  lng             Float?
+  isDefault       Boolean @default(false)
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  userId          String
+  user            User    @relation(fields: [userId], references: [id])
+  
+  @@map("addresses")
+}
+
+model Review {
+  id              String   @id @default(cuid())
+  rating          Int      // 1-5 stars
+  comment         String?
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id])
+  customerId      String
+  customer        User     @relation(fields: [customerId], references: [id])
+  
+  @@unique([orderId])
+  @@map("reviews")
+}
+
+model Subscription {
+  id              String            @id @default(cuid())
+  mpSubscriptionId String?          @unique // Mercado Pago subscription ID
+  status          SubscriptionStatus @default(ACTIVE)
+  
+  // Billing
+  amount          Float
+  currency        String            @default("BRL")
+  frequency       SubscriptionFrequency @default(MONTHLY)
+  startDate       DateTime
+  endDate         DateTime?
+  nextBillingDate DateTime
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company @relation(fields: [companyId], references: [id])
+  
+  @@map("subscriptions")
+}
+
+// ================================
+// ENUMS
+// ================================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  RESTAURANT_OWNER
+  CUSTOMER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum Plan {
+  TRIAL
+  BASIC
+  PREMIUM
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERING
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  DEBIT_CARD
+  CASH
+  MONEY_CHANGE  // cash with change
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+enum SubscriptionFrequency {
+  MONTHLY
+  YEARLY
+}
+
+// ================================
+// LOGGING AND AUDIT
+// ================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  resource    String
+  resourceId  String?
+  userId      String?
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("audit_logs")
+}
