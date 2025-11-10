@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rioeats-postgres
+    environment:
+      POSTGRES_DB: rioeats
+      POSTGRES_USER: rioeats_user
+      POSTGRES_PASSWORD: rioeats_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/database/sql:/docker-entrypoint-initdb.d
+    networks:
+      - rioeats-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: rioeats-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - rioeats-network
+    command: redis-server --appendonly yes
+
+  # Backend API (NestJS)
+  api:
+    build:
+      context: .
+      dockerfile: packages/database/Dockerfile
+    container_name: rioeats-api
+    environment:
+      DATABASE_URL: postgresql://rioeats_user:rioeats_password@postgres:5432/rioeats
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-rioeats-jwt-secret-dev}
+      MP_CLIENT_ID: ${MP_CLIENT_ID:-test}
+      MP_CLIENT_SECRET: ${MP_CLIENT_SECRET:-test}
+      MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-test-webhook}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-test}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-test}
+      NODE_ENV: development
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - rioeats-network
+    command: npm run dev --workspace=@rioeats/api
+
+  # Frontend Web (Next.js)
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: rioeats-web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_ADMIN_URL: http://localhost:3002
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - /app/apps/web/.next
+    depends_on:
+      - api
+    networks:
+      - rioeats-network
+    command: npm run dev --workspace=@rioeats/web
+
+  # Admin Panel (Next.js)
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    container_name: rioeats-admin
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NODE_ENV: development
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - /app/apps/admin/.next
+    depends_on:
+      - api
+    networks:
+      - rioeats-network
+    command: npm run dev --workspace=@rioeats/admin
+
+  # Nginx Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: rioeats-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./deploy/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+      - web
+      - admin
+    networks:
+      - rioeats-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  rioeats-network:
+    driver: bridge
